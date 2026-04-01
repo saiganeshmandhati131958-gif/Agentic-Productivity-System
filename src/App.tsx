@@ -37,13 +37,65 @@ interface Event {
   type: 'class' | 'meeting' | 'study';
 }
 
+interface ExecutionStep {
+  agent: string;
+  status: 'pending' | 'active' | 'completed';
+  message: string;
+  timestamp?: string;
+  decision?: string;
+}
+
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   agents?: string[];
+  steps?: ExecutionStep[];
 }
 
 // --- Components ---
+
+const ExecutionTrace = ({ steps }: { steps: ExecutionStep[] }) => (
+  <div className="bg-slate-900/5 rounded-xl p-4 border border-slate-200/50 space-y-4">
+    <div className="flex items-center justify-between mb-1">
+      <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Live Execution Trace</span>
+      <div className="flex gap-1">
+        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+      </div>
+    </div>
+    {steps.map((step, i) => (
+      <motion.div 
+        key={i}
+        initial={{ opacity: 0, x: -10 }}
+        animate={{ opacity: 1, x: 0 }}
+        className="flex items-start gap-3 relative"
+      >
+        {i < steps.length - 1 && (
+          <div className="absolute left-[3px] top-4 w-[1px] h-full bg-slate-200"></div>
+        )}
+        <div className={`mt-1.5 w-2 h-2 rounded-full shrink-0 z-10 ${
+          step.status === 'completed' ? 'bg-emerald-500' : step.status === 'active' ? 'bg-indigo-500 animate-pulse' : 'bg-slate-300'
+        }`}></div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-bold text-slate-700 uppercase tracking-tight">{step.agent}</p>
+            {step.timestamp && (
+              <span className="text-[9px] text-slate-400 font-mono">
+                {new Date(step.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-slate-600 leading-tight mt-0.5">{step.message}</p>
+          {step.decision && (
+            <div className="mt-1.5 bg-white/50 p-2 rounded-lg border border-slate-100">
+              <p className="text-[10px] font-bold text-indigo-600 uppercase tracking-tighter">Decision</p>
+              <p className="text-[10px] text-slate-500 italic leading-tight">{step.decision}</p>
+            </div>
+          )}
+        </div>
+      </motion.div>
+    ))}
+  </div>
+);
 
 const SidebarItem = ({ icon: Icon, label, active, onClick }: { icon: any, label: string, active?: boolean, onClick: () => void }) => (
   <button 
@@ -83,22 +135,39 @@ export default function App() {
   ]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [currentSteps, setCurrentSteps] = useState<ExecutionStep[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  useEffect(scrollToBottom, [messages]);
+  useEffect(scrollToBottom, [messages, currentSteps]);
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim()) return;
+  const simulateSteps = async (steps: any[]) => {
+    setCurrentSteps([]);
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      setCurrentSteps(prev => [...prev, { ...step, status: 'active' }]);
+      await new Promise(r => setTimeout(r, 600));
+      setCurrentSteps(prev => {
+        const newSteps = [...prev];
+        newSteps[i] = { ...step, status: 'completed' };
+        return newSteps;
+      });
+    }
+    await new Promise(r => setTimeout(r, 400));
+  };
 
-    const userMsg = input;
+  const handleSendMessage = async (e?: React.FormEvent, overrideMsg?: string) => {
+    if (e) e.preventDefault();
+    const userMsg = overrideMsg || input;
+    if (!userMsg.trim()) return;
+
     setInput('');
     setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
     setIsTyping(true);
+    setCurrentSteps([]);
 
     try {
       const res = await fetch('/api/chat', {
@@ -107,16 +176,27 @@ export default function App() {
         body: JSON.stringify({ message: userMsg })
       });
       const data = await res.json();
+      
+      if (data.steps) {
+        await simulateSteps(data.steps);
+      }
+
       setMessages(prev => [...prev, { 
         role: 'assistant', 
         content: data.response,
-        agents: data.agents_involved
+        agents: data.agents_involved,
+        steps: data.steps
       }]);
     } catch (err) {
       console.error(err);
     } finally {
       setIsTyping(false);
+      setCurrentSteps([]);
     }
+  };
+
+  const runDemoStory = () => {
+    handleSendMessage(undefined, "I have an OS exam next Friday, 3 pending assignments, and a project meeting Tuesday. Help me plan my week.");
   };
 
   const tasks: Task[] = [
@@ -207,9 +287,22 @@ export default function App() {
                 {/* AI Chat Assistant - Large Card */}
                 <BentoCard title="AI Orchestrator" icon={Cpu} className="col-span-8 row-span-2 flex flex-col h-[500px]">
                   <div className="flex-1 overflow-y-auto mb-4 space-y-4 pr-2 scrollbar-thin scrollbar-thumb-slate-200">
+                    {messages.length === 1 && (
+                      <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-2xl mb-4">
+                        <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest mb-2">Hackathon Demo Mode</p>
+                        <p className="text-sm text-indigo-900 mb-3">Experience the full multi-agent orchestration by running the "OS Exam" scenario.</p>
+                        <button 
+                          onClick={runDemoStory}
+                          className="w-full bg-indigo-600 text-white py-2 rounded-xl text-sm font-bold shadow-md hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
+                        >
+                          <Zap size={16} fill="currentColor" />
+                          Run OS Exam Story
+                        </button>
+                      </div>
+                    )}
                     {messages.map((msg, i) => (
-                      <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[80%] p-4 rounded-2xl ${
+                      <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                        <div className={`max-w-[85%] p-4 rounded-2xl ${
                           msg.role === 'user' 
                             ? 'bg-indigo-600 text-white rounded-tr-none' 
                             : 'bg-slate-100 text-slate-800 rounded-tl-none'
@@ -225,9 +318,19 @@ export default function App() {
                             </div>
                           )}
                         </div>
+                        {msg.steps && msg.role === 'assistant' && (
+                          <div className="mt-2 w-[85%]">
+                            <ExecutionTrace steps={msg.steps} />
+                          </div>
+                        )}
                       </div>
                     ))}
-                    {isTyping && (
+                    {currentSteps.length > 0 && (
+                      <div className="flex flex-col items-start w-[85%]">
+                        <ExecutionTrace steps={currentSteps} />
+                      </div>
+                    )}
+                    {isTyping && currentSteps.length === 0 && (
                       <div className="flex justify-start">
                         <div className="bg-slate-100 p-4 rounded-2xl rounded-tl-none flex gap-1">
                           <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
