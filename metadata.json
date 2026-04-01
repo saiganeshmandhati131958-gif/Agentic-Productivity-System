@@ -1,0 +1,5 @@
+{
+  "name": "Student Productivity OS",
+  "description": "A multi-agent AI command center coordinating tasks, schedules, and lecture notes using Google ADK, MCP, and AlloyDB AI.",
+  "requestFramePermissions": ["geolocation"]
+}
